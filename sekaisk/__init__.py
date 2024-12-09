@@ -319,7 +319,7 @@ async def twwlspeed_handler(bot: Bot, event: GroupMessageEvent):
 
 
 
-twprofile = on_command("tw个人信息",aliases='twpjskprofile',priority=1,block=True)
+twprofile = on_command("tw个人信息",aliases={'twpjskprofile'},priority=1,block=True)
 @twprofile.handle()
 async def profile_handler(bot: Bot, event: GroupMessageEvent):
     qqnum = event.user_id

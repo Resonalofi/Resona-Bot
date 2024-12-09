@@ -1,4 +1,3 @@
-import time
 import ujson as json
 import os
 import io
@@ -17,6 +16,7 @@ class userprofile(object):
         self.twitterId = ''
         self.word = ''
         self.userDecks = [0, 0, 0, 0, 0]
+        self.masterrank = [0, 0, 0, 0, 0]
         self.special_training = [False, False, False, False, False]
         self.full_perfect = [0, 0, 0, 0, 0, 0]
         self.full_combo = [0, 0, 0, 0, 0, 0]
@@ -72,11 +72,12 @@ class userprofile(object):
         for i in range(0, 5):
             self.userDecks[i] = data['userDeck'][f'member{i + 1}']
     
-            for userCards in data['userCards']:
-                if userCards['cardId'] != self.userDecks[i]:
+            for userCard in data['userCards']:
+                if userCard['cardId'] != self.userDecks[i]:
                     continue
-                if userCards['defaultImage'] == "special_training":
+                if userCard['defaultImage'] == "special_training":
                     self.special_training[i] = True
+                    self.masterrank[i] = userCard.get('masterRank', 0)
 
 
 def pjskprofile(userid, private=None, is_force_update=False, group_id=None):
@@ -147,6 +148,13 @@ def pjskprofile(userid, private=None, is_force_update=False, group_id=None):
             # cardimg = cardimg.resize((151, 151))
             r, g, b, mask = cardimg.split()
             img.paste(cardimg, (111 + 128 * i, 488), mask)
+
+            maseter_rank = profile.masterrank[i]
+            # logger.info(f"{maseter_rank}")
+            if profile.masterrank[i]:    
+               cardmr = Image.open(f'pics/MR_{maseter_rank}.png')
+               r, g, b, mask = cardmr.split()
+               img.paste(cardmr, (183 + 128 * i, 561), mask)
         except FileNotFoundError:
             pass
 
@@ -499,7 +507,7 @@ def generatehonor(honor, ismain=True, userHonorMissions=None):
                 else:
                     pic.paste(frame, (0, 0), mask)
                 r, g, b, mask = rankpic.split()
-                print(rankpic.height)
+                # print(rankpic.height)
                 if rankpic.height == 80:
                     pic.paste(rankpic, (0, 0), mask)
                 else:
