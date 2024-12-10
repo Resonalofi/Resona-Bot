@@ -28,6 +28,9 @@ class userprofile(object):
         self.characterRank = {}
         self.characterId = 0
         self.highScore = 0
+        self.power = 0
+        self.challenageStagecharacterId = {}  
+        self.challenageStage = {}  
         self.masterscore = {}
         self.expertscore = {}
         self.appendscore = {}
@@ -39,12 +42,11 @@ class userprofile(object):
         for i in range(23, 39):
             self.appendscore[i] = [0, 0, 0, 0]
 
-    def getprofile(self, userid , data=None, is_force_update=False):
+    def getprofile(self, userid , data=None):
         client = ApiClient(userid)
    
         if data is None:
-            data = client.call_infoapi(f'/user/{userid}/profile',is_force_update=is_force_update)
- 
+            data = client.call_infoapi(f'/user/{userid}/profile')
             # if data:
             #     logger.debug(f"success get infodata")
         self.twitterId = data.get('userProfile', {}).get('twitterId', "")
@@ -54,6 +56,21 @@ class userprofile(object):
         try:
             self.characterId = data['userChallengeLiveSoloResult']['characterId']
             self.highScore = data['userChallengeLiveSoloResult']['highScore']
+            max_ranks = {}
+
+            for entry in data["userChallengeLiveSoloStages"]:
+                character_id = entry["characterId"]
+                rank = entry["rank"]
+    
+                if character_id in max_ranks:
+                   if rank > max_ranks[character_id]:
+                      max_ranks[character_id] = rank
+                else:
+                   max_ranks[character_id] = rank
+            max_rank_character_id = max(max_ranks, key=max_ranks.get)
+            max_rank = max_ranks[max_rank_character_id]
+            self.challenageStage = max_rank
+            self.challenageStagecharacterId = max_rank_character_id
         except:
             pass
 
@@ -68,6 +85,7 @@ class userprofile(object):
         self.clear = [count_data[i]['liveClear'] if i < len(count_data) else 0 for i in range(6)]
         self.mvpCount = data['userMultiLiveTopScoreCount']['mvp']
         self.superStarCount = data['userMultiLiveTopScoreCount']['superStar']
+        self.power = data['totalPower']['totalPower']
        
         for i in range(0, 5):
             self.userDecks[i] = data['userDeck'][f'member{i + 1}']
@@ -77,20 +95,31 @@ class userprofile(object):
                     continue
                 if userCard['defaultImage'] == "special_training":
                     self.special_training[i] = True
-                    self.masterrank[i] = userCard.get('masterRank', 0)
+                self.masterrank[i] = userCard.get('masterRank', 0)
 
 
-def pjskprofile(userid, private=None, is_force_update=False, group_id=None):
+def pjskprofile(userid, private=0, qqnum=0):
     profile = userprofile()
-    profile.getprofile(userid, is_force_update=is_force_update)
+    profile.getprofile(userid)
     if private == 0:
        id = userid
     else:
         id = "Private"
-    img = Image.open('pics/pjskprofile_new.png')
-    # if img:
-    #   logger.debug("success open progfile img")
-
+    if qqnum != 0:
+        png_path = os.path.join("pics", "bg", f"{qqnum}.png")
+        jpg_path = os.path.join("pics", "bg", f"{qqnum}.jpg")
+        if os.path.exists(png_path):
+            image_path = png_path
+        elif os.path.exists(jpg_path):
+            image_path = jpg_path
+        else:
+            image_path = r"pics/bg/default.png"
+    else:
+        image_path = r"pics/bg/default.png"
+    raw = Image.open(image_path)
+    template_profile = Image.open(r"pics/pjskprofile.png")
+    img = raw.filter(ImageFilter.GaussianBlur(5))
+    img.paste(template_profile,(0,0),template_profile)
     with open('./twmasterdata/cards.json', 'r', encoding='utf-8') as f:
         cards = json.load(f)
     # if cards:
@@ -127,10 +156,13 @@ def pjskprofile(userid, private=None, is_force_update=False, group_id=None):
     bbox = font_style.getbbox(profile.word)
     size = (bbox[2] - bbox[0], bbox[3] - bbox[1])
     if size[0] > 480:
-        draw.text((132, 388), profile.word[:int(len(profile.word) * (460 / size[0]))], fill=(0, 0, 0), font=font_style)
-        draw.text((132, 424), profile.word[int(len(profile.word) * (460 / size[0])):], fill=(0, 0, 0), font=font_style)
+        draw.text((132, 312), profile.word[:int(len(profile.word) * (460 / size[0]))], fill=(0, 0, 0), font=font_style)
+        draw.text((132, 348), profile.word[int(len(profile.word) * (460 / size[0])):], fill=(0, 0, 0), font=font_style)
     else:
-        draw.text((132, 388), profile.word, fill=(0, 0, 0), font=font_style)
+        draw.text((132, 312), profile.word, fill=(0, 0, 0), font=font_style)
+        
+    font_style = ImageFont.truetype("./data/HarmonyOS_Sans_SC_Medium.ttf", 31)
+    draw.text((298, 440), str(profile.power), fill=(0, 0, 0), font=font_style)
 
     for i in range(0, 5):
         try:
@@ -163,37 +195,37 @@ def pjskprofile(userid, private=None, is_force_update=False, group_id=None):
         bbox = font_style.getbbox(str(profile.clear[i]))
         text_width = bbox[2] - bbox[0]
         text_height = bbox[3] - bbox[1]
-        text_coordinate = (int(167 + 105 * i - text_width / 2), int(732 - text_height / 2))
+        text_coordinate = (int(148 + 108 * i - text_width / 2), int(732 - text_height / 2))
         draw.text(text_coordinate, str(profile.clear[i]), fill=(0, 0, 0), font=font_style)
 
         bbox = font_style.getbbox(str(profile.full_combo[i]))
         text_width = bbox[2] - bbox[0]
         text_height = bbox[3] - bbox[1]
-        text_coordinate = (int(167 + 105 * i - text_width / 2), int(732 + 133 - text_height / 2))
+        text_coordinate = (int(148 + 108 * i - text_width / 2), int(732 + 133 - text_height / 2))
         draw.text(text_coordinate, str(profile.full_combo[i]), fill=(0, 0, 0), font=font_style)
 
         bbox = font_style.getbbox(str(profile.full_perfect[i]))
         text_width = bbox[2] - bbox[0]
         text_height = bbox[3] - bbox[1]
-        text_coordinate = (int(167 + 105 * i - text_width / 2), int(732 + 2 * 133 - text_height / 2))
+        text_coordinate = (int(148 + 108 * i - text_width / 2), int(732 + 2 * 133 - text_height / 2))
         draw.text(text_coordinate, str(profile.full_perfect[i]), fill=(0, 0, 0), font=font_style)
 
     bbox = font_style.getbbox(str(profile.clear[5]))
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
-    text_coordinate = (int(707 - text_width / 2), int(732 - text_height / 2))
+    text_coordinate = (int(705 - text_width / 2), int(732 - text_height / 2))
     draw.text(text_coordinate, str(profile.clear[5]), fill=(0, 0, 0), font=font_style)
 
     bbox = font_style.getbbox(str(profile.full_combo[5]))
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
-    text_coordinate = (int(707 - text_width / 2), int(732 + 133 - text_height / 2))
+    text_coordinate = (int(705 - text_width / 2), int(732 + 133 - text_height / 2))
     draw.text(text_coordinate, str(profile.full_combo[5]), fill=(0, 0, 0), font=font_style)
 
     bbox = font_style.getbbox(str(profile.full_perfect[5]))
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
-    text_coordinate = (int(707 - text_width / 2), int(732 + 2 * 133 - text_height / 2))
+    text_coordinate = (int(705 - text_width / 2), int(732 + 2 * 133 - text_height / 2))
     draw.text(text_coordinate, str(profile.full_perfect[5]), fill=(0, 0, 0), font=font_style)
 
     character = 0
@@ -227,14 +259,20 @@ def pjskprofile(userid, private=None, is_force_update=False, group_id=None):
             if character == 26:
                 break
 
-    draw.text((952, 141), f'{profile.mvpCount}回', fill=(0, 0, 0), font=font_style)
-    draw.text((1259, 141), f'{profile.superStarCount}回', fill=(0, 0, 0), font=font_style)
+    draw.text((978, 150), f'{profile.mvpCount}回', fill=(0, 0, 0), font=font_style)
+    draw.text((1270, 150), f'{profile.superStarCount}回', fill=(0, 0, 0), font=font_style) 
     try:
         chara = Image.open(f'chara/chr_ts_{profile.characterId}.png')
-        chara = chara.resize((70, 70))
+        chara = chara.resize((74, 74))  
         r, g, b, mask = chara.split()
-        img.paste(chara, (952, 293), mask)
-        draw.text((1032, 315), str(profile.highScore), fill=(0, 0, 0), font=font_style)
+        img.paste(chara, (984, 304), mask)  
+        draw.text((1075, 330), str(profile.highScore), fill=(0, 0, 0), font=font_style)  
+
+        challenage_chara = Image.open(f'chara/chr_ts_{profile.challenageStagecharacterId}.png')
+        challenage_chara = challenage_chara.resize((74, 74))  
+        r, g, b, mask = challenage_chara.split()
+        img.paste(challenage_chara, (1245, 304), mask)  
+        draw.text((1335, 330), 'STAGE ' + str(profile.challenageStage), fill=(0, 0, 0), font=font_style)  
     except:
         pass
     for i in profile.userProfileHonors:
@@ -251,9 +289,9 @@ def pjskprofile(userid, private=None, is_force_update=False, group_id=None):
         if i['seq'] == 2:
             try:
                 honorpic = generatehonor(i, False, profile.userHonorMissions)
-                honorpic = honorpic.resize((126, 56))
+                honorpic = honorpic.resize((132, 58))
                 r, g, b, mask = honorpic.split()
-                img.paste(honorpic, (375, 228), mask)
+                img.paste(honorpic, (370, 227), mask)
             except:
                 pass
 
@@ -261,9 +299,9 @@ def pjskprofile(userid, private=None, is_force_update=False, group_id=None):
         if i['seq'] == 3:
             try:
                 honorpic = generatehonor(i, False, profile.userHonorMissions)
-                honorpic = honorpic.resize((126, 56))
+                honorpic = honorpic.resize((132, 58))
                 r, g, b, mask = honorpic.split()
-                img.paste(honorpic, (508, 228), mask)
+                img.paste(honorpic, (504, 227), mask)
             except:
                 pass
 

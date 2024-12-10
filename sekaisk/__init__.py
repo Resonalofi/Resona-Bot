@@ -40,6 +40,7 @@ async def handle_refresh_sk(bot: Bot, event: Event):
         event_id = event_info['id']
         event_type = event_info['eventType']
         event_announce = event_info['rankannounce']
+        await bot.send(event,message=f"开始获取榜线")
 
         async def refresh_task_sk():
             while True:
@@ -55,7 +56,6 @@ async def handle_refresh_sk(bot: Bot, event: Event):
 
                     if result:
                         logger.info(f"榜线更新成功，时间: {current_time}")
-                        client.save_json(result, f"{event_id}{event_type}sk.json", indent=4)
                         if event_type in ["marathon", "cheerful_carnival"]:
                             update_skdatabase(result, event_id, event_type, data_time)
                         elif event_type == "world_bloom":
@@ -109,7 +109,7 @@ async def handle_refresh_sk(bot: Bot, event: Event):
             try:
                 await asyncio.gather(task1, task2)
             except Exception as e:
-                logger.error(f"任务执行过程中发生错误: {e}")
+                logger.debug(f"任务执行过程中发生错误: {e}")
 
         await start_tasks()
 
@@ -333,7 +333,7 @@ async def profile_handler(bot: Bot, event: GroupMessageEvent):
         if not os.path.exists(piccache_dir):
             os.makedirs(piccache_dir)
         
-        image_path = pjskprofile(userid=userId,private=private)
+        image_path = pjskprofile(userid=userId,private=private,qqnum=qqnum)
         image_path = Path(image_path).resolve()
         message=MessageSegment.image(f"file://{image_path}")
         await bot.send(event, message)
