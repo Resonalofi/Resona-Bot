@@ -1,5 +1,6 @@
 import re
 import os
+import shutil
 from nonebot import get_plugin_config, on_command, get_driver
 from .config import Config
 from nonebot.plugin import PluginMetadata
@@ -570,7 +571,7 @@ private = on_command("tw不给看", priority=1, block=True)
 async def private_handler(bot: Bot, event: GroupMessageEvent):
     qqnum = event.user_id
     update_binddatabase(qqnum=qqnum,private=1)
-    await private.finish("已设置私密")
+    await private.finish("已设置隐藏")
 
 public = on_command("tw给看", priority=1, block=True)
 
@@ -579,3 +580,46 @@ async def public_handler(bot: Bot, event: GroupMessageEvent):
     qqnum = event.user_id
     update_binddatabase(qqnum=qqnum,private=0)
     await public.finish("已设置公开")
+
+
+change_bg = on_command('更新背景',aliases={'背景更新'}, priority=1, block=True)
+
+@change_bg.handle()
+async def change_bg_send(bot: Bot, event: GroupMessageEvent):
+    msg = str(event.get_message())
+    qqnum = event.get_user_id()
+    file_match = re.search(r'file=([^,]+)', msg)
+    
+    if file_match:
+        file_value = file_match.group(1)
+        # logger.debug(f"提取的 file 参数值: {file_value}")
+
+        try:
+            image_info = await bot.get_image(file=file_value)
+            image_path = image_info["file"]
+            # logger.debug(f"获取到图片: {image_path}")
+            _, ext = os.path.splitext(image_path)
+
+            if ext.lower() not in ['.jpg', '.png']:
+                await bot.send(event, "图片格式不支持，请上传 jpg 或 png 格式的图片")
+                return
+            
+            with Image.open(image_path) as img:
+                width, height = img.size
+                if width != 1600 or height != 1100:
+                    await bot.send(event, f"图片尺寸为 {width}x{height}，请裁剪为1600x1100后重新上传")
+                    return
+
+            save_path = f"./pics/bg/{qqnum}{ext}"
+            for ext in ['.png', '.jpg']:
+                existing_file = f"./pics/bg/{qqnum}{ext}"
+                if os.path.exists(existing_file):
+                    os.remove(existing_file)
+
+            shutil.move(image_path, save_path)
+            # logger.debug(f"图片已保存到 {save_path}")
+            await bot.send(event, "背景已更新")
+        except Exception as e:
+            await bot.send(event, f"获取图片失败{e}")
+    else:
+        return
