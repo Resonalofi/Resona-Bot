@@ -1,3 +1,4 @@
+from math import log
 import ujson as json
 import sqlite3
 import time
@@ -122,7 +123,16 @@ def calculate_score_info(score_changes, current_score, now):
     HOUR_SECONDS = 3600
     TWENTY_MINUTES = 1200
 
-    last_hour_scores = [sc for sc in score_changes if sc[3] >= now - HOUR_SECONDS]
+    last_hour_scores = []
+    seen_scores = set()
+    for sc in reversed(score_changes):
+        if sc[3] >= now - HOUR_SECONDS and sc[2] not in seen_scores:
+            last_hour_scores.append(sc)
+            seen_scores.add(sc[2])
+        elif sc[3] < now - HOUR_SECONDS:
+            break
+    last_hour_scores.reverse()
+
     if last_hour_scores:
         first_last_hour_score = last_hour_scores[0]
         hourly_score = current_score - first_last_hour_score[2]
@@ -131,12 +141,20 @@ def calculate_score_info(score_changes, current_score, now):
             hourly_speed = hourly_score / time_diff * HOUR_SECONDS / 10000
             result += f"\n时速: {hourly_speed:.2f}W"
 
-        hour_count = sum(1 for i in range(1, len(score_changes)) if score_changes[i][3] >= now - HOUR_SECONDS and score_changes[i][2] > score_changes[i-1][2])
+        hour_count = sum(1 for i in range(1, len(last_hour_scores)) if last_hour_scores[i][2] > last_hour_scores[i-1][2])
         result += f"\n一小时周回: {hour_count}"
 
         if hour_count > 0:
             avg_score = hourly_score / hour_count / 10000
             result += f"\n一小时平均单局pt: {avg_score:.3f}W"
+
+            if len(last_hour_scores) > 1:
+                last_game_score_change = last_hour_scores[-1]
+                second_last_game_score_change = last_hour_scores[-2]
+                last_game_score = last_game_score_change[2] - second_last_game_score_change[2]
+                result += f"\n最近一局pt: {last_game_score / 10000:.3f}W"
+            else:
+                result += "\n最近一局pt: 无数据"
 
     twenty_min_score = next((sc for sc in score_changes if sc[3] >= now - TWENTY_MINUTES), None)
     if twenty_min_score:
