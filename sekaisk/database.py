@@ -357,7 +357,7 @@ def get_binddb_connection():
     
     return db_path
 
-def update_binddatabase(userId=None, qqnum=None, private=None, ban=None): 
+def update_binddatabase(userId=None, qqnum=None, private=None, ban=None,theme=None): 
     db_path = get_binddb_connection()
 
     if qqnum is None:
@@ -384,6 +384,9 @@ def update_binddatabase(userId=None, qqnum=None, private=None, ban=None):
                 if ban is not None:
                     updates.append("ban = ?")
                     params.append(ban)
+                if theme is not None:
+                    updates.append("theme = ?")
+                    params.append(theme)
 
                 if updates:
                     sql = f"UPDATE bindform SET {', '.join(updates)} WHERE qqnum = ?"
@@ -391,9 +394,9 @@ def update_binddatabase(userId=None, qqnum=None, private=None, ban=None):
                     cur.execute(sql, tuple(params))
             else:
                 cur.execute('''
-                    INSERT INTO bindform (userId, qqnum, private, ban) 
-                    VALUES (?, ?, ?, ?)
-                ''', (userId, qqnum, private or 0, ban or 0))
+                    INSERT INTO bindform (userId, qqnum, private, ban, theme) 
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (userId, qqnum, private or 0, ban or 0, theme or '#FFFFFF'))
 
             conn.commit()
     except Exception as e:
@@ -405,15 +408,16 @@ def get_bindid(qqnum):
     try:
         with sqlite3.connect(db_path) as conn:
             cur = conn.cursor()
-            cur.execute("SELECT userId, private, ban FROM bindform WHERE qqnum = ?", (qqnum,))
+            cur.execute("SELECT userId, private, ban ,theme FROM bindform WHERE qqnum = ?", (qqnum,))
             result = cur.fetchone()  
             if result:
                 userId = result[0]  
                 private = result[1]
                 ban = result[2]
-                return userId, private, ban          
+                theme = result[3]
+                return userId, private, ban, theme         
             else:
-                return None, 0 , 0  
+                return None, 0 , 0 , 'white' 
     except Exception as e:
         logger.error(f"Error querying database: {e}")
         pass

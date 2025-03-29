@@ -1,22 +1,22 @@
 import re
 import os
 import shutil
+from pathlib import Path
+import time
+from PIL import Image, ImageFont, ImageDraw
 from nonebot import get_plugin_config, on_command, get_driver
-from .config import Config
 from nonebot.plugin import PluginMetadata
 from nonebot.permission import SUPERUSER
 from nonebot.log import logger
-from nonebot.adapters.onebot.v11 import Bot, Event, GroupMessageEvent,MessageSegment
+from nonebot.adapters.onebot.v11 import Bot, Event, GroupMessageEvent,MessageSegment,Message
 from .twmusicleak import twmusicleak
-from .api_client import ApiClient
 from .pjskprofile import pjskprofile
-from .database import update_skdatabase,update_binddatabase,update_wlskdatabase,update_borderdatabase,update_wlborder_database,value_to_key,get_bindid
-from .sk import current_event,get_player_rank,get_player_singlerank,get_border_scores,get_dangours_speed,get_border_speed
-from PIL import Image, ImageFont, ImageDraw
-from .texttoimg import t2i
-from pathlib import Path
-import asyncio
-import time
+from .database import update_binddatabase,value_to_key,get_bindid
+from .sk import get_player_rank,get_player_singlerank,get_border_scores,get_dangours_speed,get_border_speed,get_stop_time
+from .texttoimg import create_text_image
+from .scheduler_manager import init_scheduler
+from .config import Config
+
 
 
 __plugin_meta__ = PluginMetadata(
@@ -25,95 +25,21 @@ __plugin_meta__ = PluginMetadata(
     usage="",
     config=Config,
 )
-config = get_plugin_config(Config)
-superusers = get_driver()
 
+api_account_id = Config.user_id
+driver = get_driver()
 
-refresh_sk = on_command("rsk", priority=1, block=True, permission=SUPERUSER)
+#开机自启动
+@driver.on_startup
+async def startup():
+    await init_scheduler(user_id=api_account_id)
+
+refresh_sk = on_command("rsk", priority=1, block=True,permission=SUPERUSER)
 
 @refresh_sk.handle()
-async def handle_refresh_sk(bot: Bot, event: Event):
-    admin = config.admin
-    user_id = config.user_id
-    client = ApiClient(user_id)
-    event_info = current_event()
-    if event_info:
-        event_id = event_info['id']
-        event_type = event_info['eventType']
-        event_announce = event_info['rankannounce']
-        await bot.send(event,message=f"开始获取榜线")
-
-        async def refresh_task_sk():
-            while True:
-                now = int(time.time() * 1000)
-                if now > (event_announce + 120000):
-                    logger.info("榜线已公示，停止获取榜线")
-                    break
-
-                for retry in range(3):
-                    result = client.call_api(f"/user/{user_id}/event/{event_id}/ranking?rankingViewType=top100")
-                    data_time = int(time.time())
-                    current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-
-                    if result:
-                        logger.info(f"榜线更新成功，时间: {current_time}")
-                        if event_type in ["marathon", "cheerful_carnival"]:
-                            update_skdatabase(result, event_id, event_type, data_time)
-                        elif event_type == "world_bloom":
-                            update_wlskdatabase(result, event_id, event_type, data_time)
-                        break
-                    else:
-                        logger.debug(f"获取榜线失败，尝试 {retry + 1}/3，当前时间: {current_time}")
-                        await asyncio.sleep(10)
-                else:
-                    try:
-                        await bot.send_private_msg(user_id=admin, message=f"获取T100榜线失败，当前时间: {current_time}")
-                    except Exception as e:
-                        pass
-
-                await asyncio.sleep(57)
-
-        async def refresh_task_border():
-            while True:
-                now = int(time.time() * 1000)
-                if now > (event_announce + 310000):
-                    logger.info("榜线已公示，停止获取榜线")
-                    break
-
-                for retry in range(3):
-                    result = client.call_api(f"/event/{event_id}/ranking-border")
-                    data_time = int(time.time())
-                    current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-
-                    if result:
-                        logger.info(f"整百更新成功，时间: {current_time}")
-                        client.save_json(result, f"{event_id}{event_type}border_sk.json", indent=4)
-                        if event_type in ["marathon", "cheerful_carnival"]:
-                            update_borderdatabase(result, event_id, event_type, data_time)
-                        elif event_type == "world_bloom":
-                            update_wlborder_database(result, event_id, event_type, data_time)
-                        break
-                    else:
-                        logger.debug(f"获取整百榜线失败，尝试 {retry + 1}/3，当前时间: {current_time}")
-                        await asyncio.sleep(10)
-                else:
-                    try:
-                        await bot.send_private_msg(user_id=admin, message=f"获取整百榜线失败，当前时间: {current_time}")
-                    except Exception as e:
-                        pass
-
-                await asyncio.sleep(177)
-
-        async def start_tasks():
-            task1 = asyncio.create_task(refresh_task_sk())
-            task2 = asyncio.create_task(refresh_task_border())
-            try:
-                await asyncio.gather(task1, task2)
-            except Exception as e:
-                logger.debug(f"任务执行过程中发生错误: {e}")
-
-        await start_tasks()
-
+async def refresh_sk_handler(bot: Bot, event: GroupMessageEvent):
+    await init_scheduler(user_id=api_account_id)
+    await refresh_sk.finish("已启动榜线刷新")
 
 twsk = on_command("twsk", priority=1, block=True)
 
@@ -122,33 +48,32 @@ async def twsk_handler(bot: Bot, event: GroupMessageEvent):
     raw_input = event.get_plaintext().strip()
     command_part = raw_input[4:].strip()
     qqnum = event.user_id
-
-    if not command_part:
-        userId , _ , ban = get_bindid(qqnum)
-        logger.info(f"{userId},{ban}")
-        if ban == 1:
+    userId , _ , ban , theme = get_bindid(qqnum)
+    if ban == 1:
            await twsk.finish("您已被封禁")
-        elif userId is None:
-           await twsk.finish("您还没有绑定，请输入tw绑定+id进行绑定")
-        results = get_player_rank(userId=userId)
-        await twsk.finish(results)
+    elif userId is None:
+           return
+    if not command_part:        
+        # logger.info(f"{userId},{ban}")
+        
+       results = get_player_rank(userId=userId)
+       await twsk.finish(results)
 
     parts = command_part.split()
     #logger.info(f"Parsed parts: {parts}")
 
-    if all(part.isdigit() for part in parts) and len(parts) <= 5:
+    if all(part.isdigit() for part in parts) and len(parts) <= 8:
        results = [get_player_rank(rank=int(rank)) for rank in parts]
-       last = "\n-----------------------\n".join(results)
+       last = "\n-------------------------------\n".join(results)
     
-       img = t2i(
+       img = create_text_image(
        text=last,
+       font_path="data/HarmonyOS_Sans_SC_Medium.ttf",
        font_size=25,
-       font_color='#000000',
-       padding=(25, 25, 25, 25),
-       max_width=560,
-       wrap_type='left',
-       line_interval=5,
-       include_footer=True  
+       max_width=800,
+       line_spacing=15,
+       alignment="left",
+       bg_color=theme,
        )
        
        output_path = f"./data/piccache/{int(time.time())}.png"
@@ -170,68 +95,71 @@ twscoreline = on_command("tw线", priority=1, block=True)
 @twscoreline.handle()
 async def twscore_handler(bot: Bot, event: GroupMessageEvent):
  qqnum = event.user_id
- userId , _ , ban = get_bindid(qqnum)
+ userId , _ , ban , theme = get_bindid(qqnum)
  if ban == 1:
     await twscoreline.finish("您已被封禁")
  elif userId is None:
-    await twscoreline.finish("您还没有绑定，请输入tw绑定+id进行绑定")
+    return
 
  try:
        results , last_time = get_border_scores()
-       font = ImageFont.truetype('data/HarmonyOS_Sans_SC_Medium.ttf',25)
-       image = Image.new("RGB",(550,750),(255,255,255))
-       draw = ImageDraw.Draw(image)
-       text_pos = (20,20)
-       draw.text(text_pos,results,'#000000',font)
-
-       footer_text = f"Generated by Resona Bot\n分数线有至高5min误差，请谨慎参考\n数据更新于：{last_time}"
-       lines = footer_text.split('\n')
-       footer_width = max(draw.textlength(line, font=font) for line in lines)
-       footer_height = sum(draw.textbbox((0, 0), line, font=font)[3] for line in lines)   
-       footer_pos = (image.width - footer_width - 20, image.height - footer_height - 20)
-       draw.text(footer_pos, footer_text, '#8888cc', font)
+       image = create_text_image(
+       text=results,
+       font_path="data/HarmonyOS_Sans_SC_Medium.ttf",
+       font_size=25,
+       max_width=800,
+       line_spacing=15,
+       alignment="left",
+       include_footer =False,
+       bg_color=theme,
+       )
 
        output_path = f"./data/piccache/{int(time.time())}.png"
        image.save(output_path)
        output_path = Path(output_path).resolve()
-       await bot.send(event, message=MessageSegment.image(f"file://{output_path}"))
+       message=Message([
+           f'分数线有至高5min误差，请谨慎参考\n数据更新于：{last_time}',
+           MessageSegment.image(f"file://{output_path}")
+       ])
+       await bot.send(event, message)
  except Exception as e:
-       await bot.send(event, message=f"发生错误：{str(e)}")
+       await bot.send(event, message=f"查不到捏，怎么会是呢")
 
 twspeed = on_command("tw速", priority=1, block=True) 
 
 @twspeed.handle()
 async def twspeed_handler(bot: Bot, event: GroupMessageEvent):
  qqnum = event.user_id
- userId , _ , ban = get_bindid(qqnum)
+ userId , _ , ban , theme = get_bindid(qqnum)
  if ban == 1:
     await twwlspeed.finish("您已被封禁")
  elif userId is None:
-    await twwlspeed.finish("您还没有绑定，请输入tw绑定+id进行绑定")
+    return
     
  try:
-
        results , last_time = get_border_speed()
 
-       font = ImageFont.truetype('data/HarmonyOS_Sans_SC_Medium.ttf',25)
-       image = Image.new("RGB",(550,750),(255,255,255))
-       draw = ImageDraw.Draw(image)
-       text_pos = (20,20)
-       draw.text(text_pos,results,'#000000',font)
-
-       footer_text = f"Generated by Resona Bot\n时速有至高5min误差，请谨慎参考\n数据更新于：{last_time}"
-       lines = footer_text.split('\n')
-       footer_width = max(draw.textlength(line, font=font) for line in lines)
-       footer_height = sum(draw.textbbox((0, 0), line, font=font)[3] for line in lines)   
-       footer_pos = (image.width - footer_width - 20, image.height - footer_height - 20)
-       draw.text(footer_pos, footer_text, '#8888cc', font)
+       image = create_text_image(
+       text=results,
+       font_path="data/HarmonyOS_Sans_SC_Medium.ttf",
+       font_size=25,
+       max_width=800,
+       line_spacing=15,
+       alignment="left",
+       include_footer =False,
+       bg_color=theme,
+       )
 
        output_path = f"./data/piccache/{int(time.time())}.png"
        image.save(output_path)
        output_path = Path(output_path).resolve()
-       await bot.send(event, message=MessageSegment.image(f"file://{output_path}"))
+       message=Message([
+           f'档线计算时速有至高5min误差，请谨慎参考\n数据更新于：{last_time}',
+           MessageSegment.image(f"file://{output_path}")
+       ])
+       await bot.send(event, message)
  except Exception as e:
-       await bot.send(event, message=f"发生错误：{str(e)}")
+       await bot.send(event, message=f"查不到捏，怎么会是呢")
 
 
 twwlscoreline = on_command("wl线", priority=1, block=True) 
@@ -239,11 +167,11 @@ twwlscoreline = on_command("wl线", priority=1, block=True)
 @twwlscoreline.handle()
 async def twwlscore_handler(bot: Bot, event: GroupMessageEvent):
  qqnum = event.user_id
- userId , _ , ban = get_bindid(qqnum)
+ userId , _ , ban , theme = get_bindid(qqnum)
  if ban == 1:
     await twwlscoreline.finish("您已被封禁")
  elif userId is None:
-    await twwlscoreline.finish("您还没有绑定，请输入tw绑定+id进行绑定")
+    return
 
  try:
        raw_input = event.get_plaintext().strip()
@@ -253,39 +181,40 @@ async def twwlscore_handler(bot: Bot, event: GroupMessageEvent):
             await bot.send(event, "查不到角色哦，指令为wl线 角色罗马音")
             return
 
-
        results , last_time = get_border_scores(character_id)
 
-       font = ImageFont.truetype('data/HarmonyOS_Sans_SC_Medium.ttf',25)
-       image = Image.new("RGB",(550,750),(255,255,255))
-       draw = ImageDraw.Draw(image)
-       text_pos = (20,20)
-       draw.text(text_pos,results,'#000000',font)
-
-       footer_text = f"Generated by Resona Bot\n分数线有至高5min误差，请谨慎参考\n数据更新于：{last_time}"
-       lines = footer_text.split('\n')
-       footer_width = max(draw.textlength(line, font=font) for line in lines)
-       footer_height = sum(draw.textbbox((0, 0), line, font=font)[3] for line in lines)   
-       footer_pos = (image.width - footer_width - 20, image.height - footer_height - 20)
-       draw.text(footer_pos, footer_text, '#8888cc', font)
+       image = create_text_image(
+       text=results,
+       font_path="data/HarmonyOS_Sans_SC_Medium.ttf",
+       font_size=25,
+       max_width=800,
+       line_spacing=15,
+       alignment="left",
+       include_footer =False,
+       bg_color=theme,
+       )
 
        output_path = f"./data/piccache/{int(time.time())}.png"
        image.save(output_path)
        output_path = Path(output_path).resolve()
-       await bot.send(event, message=MessageSegment.image(f"file://{output_path}"))
+       message=Message([
+           f'档线有至高5min误差，请谨慎参考\n数据更新于：{last_time}',
+           MessageSegment.image(f"file://{output_path}")
+       ])
+       await bot.send(event, message)
  except Exception as e:
-       await bot.send(event, message=f"发生错误：{str(e)}")
+       await bot.send(event, message=f"查不到捏，怎么会是呢")
 
 twwlspeed = on_command("wl速", priority=1, block=True) 
 
 @twwlspeed.handle()
 async def twwlspeed_handler(bot: Bot, event: GroupMessageEvent):
  qqnum = event.user_id
- userId , _ , ban = get_bindid(qqnum)
+ userId , _ , ban , theme = get_bindid(qqnum)
  if ban == 1:
     await twwlspeed.finish("您已被封禁")
  elif userId is None:
-    await twwlspeed.finish("您还没有绑定，请输入tw绑定+id进行绑定")
+    return
     
  try:
        raw_input = event.get_plaintext().strip()
@@ -295,63 +224,60 @@ async def twwlspeed_handler(bot: Bot, event: GroupMessageEvent):
             await bot.send(event, "查不到角色哦，指令为wl速 角色罗马音")
             return
 
-
        results , last_time = get_border_speed(character_id)
-
-       font = ImageFont.truetype('data/HarmonyOS_Sans_SC_Medium.ttf',25)
-       image = Image.new("RGB",(550,750),(255,255,255))
-       draw = ImageDraw.Draw(image)
-       text_pos = (20,20)
-       draw.text(text_pos,results,'#000000',font)
-
-       footer_text = f"Generated by Resona Bot\n时速有至高5min误差，请谨慎参考\n数据更新于：{last_time}"
-       lines = footer_text.split('\n')
-       footer_width = max(draw.textlength(line, font=font) for line in lines)
-       footer_height = sum(draw.textbbox((0, 0), line, font=font)[3] for line in lines)   
-       footer_pos = (image.width - footer_width - 20, image.height - footer_height - 20)
-       draw.text(footer_pos, footer_text, '#8888cc', font)
+       image = create_text_image(
+       text=results,
+       font_path="data/HarmonyOS_Sans_SC_Medium.ttf",
+       font_size=25,
+       max_width=800,
+       line_spacing=15,
+       alignment="left",
+       include_footer =False,
+       bg_color=theme,
+       )
 
        output_path = f"./data/piccache/{int(time.time())}.png"
        image.save(output_path)
        output_path = Path(output_path).resolve()
-       await bot.send(event, message=MessageSegment.image(f"file://{output_path}"))
+       message=Message([
+           f'档线计算时速有至高5min误差，请谨慎参考\n数据更新于：{last_time}',
+           MessageSegment.image(f"file://{output_path}")
+       ])
+       await bot.send(event, message)
  except Exception as e:
-       await bot.send(event, message=f"发生错误：{str(e)}")
-
-
+       await bot.send(event, message=f"查不到捏，怎么会是呢")
 
 twprofile = on_command("tw个人信息",aliases={'twpjskprofile'},priority=1,block=True)
 @twprofile.handle()
 async def profile_handler(bot: Bot, event: GroupMessageEvent):
     qqnum = event.user_id
-    userId , private , ban = get_bindid(qqnum)
+    userId , private , ban , _ = get_bindid(qqnum)
     if ban == 1:
         await twprofile.finish("您已被封禁")
     elif userId is None:
-        await twprofile.finish("您还没有绑定，请输入tw绑定+id进行绑定")
+        return
     try:
         piccache_dir = "./data/piccache"
         if not os.path.exists(piccache_dir):
             os.makedirs(piccache_dir)
         
-        image_path = pjskprofile(userid=userId,private=private,qqnum=qqnum)
+        image_path = await pjskprofile(userid=userId,private=private,qqnum=qqnum)
         image_path = Path(image_path).resolve()
         message=MessageSegment.image(f"file://{image_path}")
         await bot.send(event, message)
     except Exception as e:
-
-        await bot.send(event, message=f"发生错误：{str(e)}")
+        await bot.send(event, message=f"查不到捏，怎么会是呢")
 
 
 twwl = on_command("wl", priority=1, block=True)
 @twwl.handle()
 async def tw_handler(bot: Bot, event: GroupMessageEvent):
     qqnum = event.user_id
-    userId , _ , ban = get_bindid(qqnum)
+    userId , _ , ban , theme = get_bindid(qqnum)
     if ban == 1:
        await twwl.finish("您已被封禁")
     elif userId is None:
-        await twwl.finish("您还没有绑定，请输入tw绑定+id进行绑定")
+        return
         
     raw_input = event.get_plaintext().strip()
     
@@ -359,8 +285,8 @@ async def tw_handler(bot: Bot, event: GroupMessageEvent):
     if match:
         ranks_str, character_value = match.groups()
         ranks = [int(rank) for rank in ranks_str.split()]
-        if len(ranks) > 3:
-            await bot.send(event, "最多只能查询3个位次")
+        if len(ranks) > 6:
+            await bot.send(event, "最多只能查询6个位次")
             return
         
         character_id = value_to_key(character_value)
@@ -373,27 +299,24 @@ async def tw_handler(bot: Bot, event: GroupMessageEvent):
             result = get_player_singlerank(rank=rank,character_id=character_id)
             results.append(result)
         
-        last = "\n".join(results)
+        last = "\n-------------------------------\n".join(results)
         try:
-               font = ImageFont.truetype('data/HarmonyOS_Sans_SC_Medium.ttf',25)
-               image = Image.new("RGB",(700,760),(255,255,255))
-               draw = ImageDraw.Draw(image)
-               text_pos = (20,20)
-               draw.text(text_pos,last,'#000000',font)
-
-               footer_text = f"Generated by Resona Bot"
-               lines = footer_text.split('\n')
-               footer_width = max(draw.textlength(line, font=font) for line in lines)
-               footer_height = sum(draw.textbbox((0, 0), line, font=font)[3] for line in lines)   
-               footer_pos = (image.width - footer_width - 20, image.height - footer_height - 20)
-               draw.text(footer_pos, footer_text, '#8888cc', font)
+               image = create_text_image(
+                     text=last,
+                     font_path="data/HarmonyOS_Sans_SC_Medium.ttf",
+                     font_size=25,
+                     max_width=800,
+                     line_spacing=15,
+                     alignment="left",
+                     bg_color=theme,
+                     )
 
                output_path = f"./data/piccache/{int(time.time())}.png"
                image.save(output_path)
                output_path = Path(output_path).resolve()
                await bot.send(event, message=MessageSegment.image(f"file://{output_path}"))
         except Exception as e:
-               await bot.send(event, message=f"发生错误：{str(e)}")
+               await bot.send(event, message=f"查不到捏，怎么会是呢")
 
     else:
         try:
@@ -406,7 +329,7 @@ async def tw_handler(bot: Bot, event: GroupMessageEvent):
                result = get_player_singlerank(userId=userId,character_id=character_id)
                await bot.send(event, result)
         except Exception as e:
-               await bot.send(event, message=f"发生错误：{str(e)}")
+               await bot.send(event, message=f"查不到捏，怎么会是呢")
 
 
 twzs = on_command("zs", priority=1, block=True)
@@ -419,37 +342,37 @@ async def twzs_handler(bot: Bot, event: GroupMessageEvent):
         await bot.send(event, "查不到角色哦，指令为“zs 角色缩写”")
         return
     qqnum = event.user_id
-    userId , _ , ban = get_bindid(qqnum)
+    userId , _ , ban , _ = get_bindid(qqnum)
     if ban == 1:
         await twzs.finish("您已被封禁")
     elif userId is None:
-        await twzs.finish("您还没有绑定，请输入tw绑定+id进行绑定")
+        return
 
     try:
         
         result = get_dangours_speed(userId,character_id)
         await bot.send(event, result)      
     except Exception as e:
-        await bot.send(event, message=f"发生错误：{str(e)}")
+        await bot.send(event, message=f"查不到捏，怎么会是呢")
 
 twbind = on_command("tw绑定", priority=1, block=True)
 @twbind.handle()
 async def twbind_handler(bot: Bot, event: GroupMessageEvent):
     raw_input = event.get_plaintext().strip()
-    id_part = raw_input[4:].strip()
+    userId = raw_input[4:].strip()
     qqnum = int(event.user_id)
     now = int(time.time())
-    if not id_part:
+    if not userId:
         await twbind.finish("请输入正确的id")
     try:
-        registertime = int(id_part) / 1024 / 1024 / 4096
+        registertime = int(userId) / 1024 / 1024 / 4096
     except ValueError:
         await twbind.finish("请输入正确的id")
     if registertime <= 1601438400 or registertime >= now:
         await twbind.finish("请输入正确的id")
     else:
         try:
-            update_binddatabase(id_part, qqnum)
+            update_binddatabase(userId, qqnum)
         except Exception as e:
             await bot.send(event, f"fail，可能是数据库连接问题: {e}")
         else:
@@ -510,19 +433,19 @@ async def twcf_handler(bot: Bot, event: GroupMessageEvent):
         return
 
     user_qqnum = event.user_id
-    user_userId , _ , ban = get_bindid(user_qqnum)
+    user_userId , _ , ban , _ = get_bindid(user_qqnum)
 
     if ban == 1:
         await twcf.finish("您已被封禁")
     elif user_userId is None:
-        await twcf.finish("您还没有绑定，请输入tw绑定+id进行绑定")
+        return
     
     at_id = [segment.data["qq"] for segment in event.message if segment.type == "at"]
     # logger.info(f"{at_id}")
     if not at_id:
         return
     for qqnum in at_id:
-        userId , private , _ = get_bindid(qqnum)
+        userId , private , _ , _ = get_bindid(qqnum)
         if private == 1:
             await twcf.finish("查不到哦，可能是不给看")
             return
@@ -538,7 +461,7 @@ async def wlcf_handler(bot: Bot, event: GroupMessageEvent):
         return
     raw_input = event.get_plaintext().strip()
     user_qqnum = event.user_id
-    user_userId , _ , ban = get_bindid(user_qqnum)
+    user_userId , _ , ban , _ = get_bindid(user_qqnum)
     character_value = raw_input[4:].strip()
     character_id = value_to_key(character_value)
 
@@ -549,14 +472,14 @@ async def wlcf_handler(bot: Bot, event: GroupMessageEvent):
     if ban == 1:
         await wlcf.finish("您已被封禁")
     elif user_userId is None:
-        await wlcf.finish("您还没有绑定，请输入tw绑定+id进行绑定")
+        return
     
     at_id = [segment.data["qq"] for segment in event.message if segment.type == "at"]
 
     if not at_id:
         return
     for qqnum in at_id:
-        userId , private , _ = get_bindid(qqnum)
+        userId , private , _ , _ = get_bindid(qqnum)
         if private == 1:
             await wlcf.finish("查不到哦，可能是不给看")
             return
@@ -623,3 +546,131 @@ async def change_bg_send(bot: Bot, event: GroupMessageEvent):
             await bot.send(event, f"获取图片失败{e}")
     else:
         return
+
+
+change_skbg = on_command('theme', priority=1, block=True)
+
+@change_skbg.handle()
+async def change_skbg_send(bot: Bot, event: GroupMessageEvent):
+    raw_input = event.get_plaintext().strip()
+    qqnum = event.user_id
+    user_userId , _ , ban , _ = get_bindid(qqnum)
+    if ban == 1:
+        await change_skbg.finish("您已被封禁")
+    elif user_userId is None:
+        await change_skbg.finish("您还没有绑定，请输入tw绑定+id进行绑定")
+    color = raw_input[5:].strip()
+    pattern = r"^#([0-9a-f]{3}|[0-9a-f]{6})$"
+    if re.match(pattern, color, re.IGNORECASE):
+        update_binddatabase(qqnum=qqnum,theme=color)
+        await change_skbg.finish("主题已更新")
+    else:
+        await change_skbg.finish("请输入正确的16进制颜色码,例如#8888cc或者#9CF") 
+
+twcsb = on_command("twcsb",aliases={'tw查水表'}, priority=1, block=True)
+
+@twcsb.handle()
+async def twcsb_handler(bot: Bot, event: GroupMessageEvent):
+    raw_input = event.get_plaintext().strip()
+    command_part = raw_input[5:].strip()
+    qqnum = event.user_id
+    userId , _ , ban , theme = get_bindid(qqnum)
+    if ban == 1:
+        await twcsb.finish("您已被封禁")
+    elif userId is None:
+        return
+    try:
+       if command_part:
+          results,is_draw = get_stop_time(rank=command_part)
+       else:
+          results,is_draw = get_stop_time(userId=userId)
+          
+       if is_draw:
+           
+           img = create_text_image(
+              text=results,
+              font_path="data/HarmonyOS_Sans_SC_Medium.ttf",
+              font_size=25,
+              max_width=800,
+              line_spacing=15,
+              alignment="left",
+              bg_color=theme,
+              )
+                 
+           output_path = f"./data/piccache/{int(time.time())}.png"
+           img.save(output_path)
+
+           if not Path(output_path).exists():
+               await bot.send("图片生成失败，请检查日志。")
+
+           output_path = Path(output_path).resolve()
+    
+           await bot.send(event, message=MessageSegment.image(f"file://{output_path}"))
+       else:
+           await bot.send(event, results)
+    except Exception as e:
+        await twcsb.finish(f"查不到捏，怎么会是呢")
+
+wlcsb = on_command("wlcsb",aliases={'wl查水表'}, priority=1, block=True)
+
+@wlcsb.handle()
+async def wlcsb_handler(bot: Bot, event: GroupMessageEvent):
+    qqnum = event.user_id
+    userId, _, ban, theme = get_bindid(qqnum)
+    if ban == 1:
+        await wlcsb.finish("您已被封禁")
+    elif userId is None:
+        await wlcsb.finish("您还没有绑定，请输入tw绑定+id进行绑定")
+
+    raw_input = event.get_plaintext().strip()[5:].strip() 
+    match = re.match(r'^(\d+\s+)?(\w+)$', raw_input)
+    if match:
+        ranks_str, character_value = match.groups()
+        # logger.debug(f"Ranks: {ranks_str}, Character: {character_value}")
+        if ranks_str:
+            ranks_str = ranks_str.strip()
+            if not ranks_str.isdigit():
+                await bot.send(event, "位次必须为数字")
+                return
+            ranks = [int(ranks_str)]
+        else:
+            ranks = None
+
+        character_id = value_to_key(character_value)
+        if character_id is None:
+            await bot.send(event, "查不到角色哦，指令为：wlcsb [位次] 角色罗马音")
+            return
+
+        try:
+            if ranks:
+                # 位次查询模式
+                results, is_draw = get_stop_time(rank=ranks[0], character=character_id)
+            else:
+                # 用户ID查询模式
+                results, is_draw = get_stop_time(userId=userId, character=character_id)
+
+            if is_draw:
+                img = create_text_image(
+                    text=results,
+                    font_path="data/HarmonyOS_Sans_SC_Medium.ttf",
+                    font_size=25,
+                    max_width=800,
+                    line_spacing=15,
+                    alignment="left",
+                    bg_color=theme,
+                )
+                output_path = f"./data/piccache/{int(time.time())}.png"
+                img.save(output_path)
+                if not Path(output_path).exists():
+                    await bot.send(event, "图片生成失败，请检查日志。")
+                await bot.send(event, message=MessageSegment.image(f"file://{Path(output_path).resolve()}"))
+            else:
+                await bot.send(event, results)
+        except Exception as e:
+            await wlcsb.finish(f"查不到捏，怎么会是呢？")
+            logger.error(f"Error: {e}")
+    else:
+        await bot.send(event, "指令格式错误，请使用：wlcsb [位次] 角色罗马音")
+
+          
+

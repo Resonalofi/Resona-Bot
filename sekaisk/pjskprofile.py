@@ -42,11 +42,11 @@ class userprofile(object):
         for i in range(23, 39):
             self.appendscore[i] = [0, 0, 0, 0]
 
-    def getprofile(self, userid , data=None):
-        client = ApiClient(userid)
+    async def getprofile(self, userid , data=None):
+        client = await ApiClient.create(userid)
    
         if data is None:
-            data = client.call_infoapi(f'/user/{userid}/profile')
+            data = await client.call_infoapi(f'/user/{userid}/profile')
             # if data:
             #     logger.debug(f"success get infodata")
         self.twitterId = data.get('userProfile', {}).get('twitterId', "")
@@ -98,9 +98,9 @@ class userprofile(object):
                 self.masterrank[i] = userCard.get('masterRank', 0)
 
 
-def pjskprofile(userid, private=0, qqnum=0):
+async def pjskprofile(userid, private=0, qqnum=0):
     profile = userprofile()
-    profile.getprofile(userid)
+    await profile.getprofile(userid)
     if private == 0:
        id = userid
     else:
@@ -149,19 +149,19 @@ def pjskprofile(userid, private=0, qqnum=0):
     draw.text((298, 116), 'id:' + str(id), fill=(0, 0, 0), font=font_style)
     font_style = ImageFont.truetype("./data/FOT-RodinNTLGPro-DB.ttf", 34)
     draw.text((415, 157), str(profile.rank), fill=(255, 255, 255), font=font_style)
-    font_style = ImageFont.truetype("./data/FOT-RodinNTLGPro-DB.ttf", 22)
-    draw.text((182, 318), str(profile.twitterId), fill=(0, 0, 0), font=font_style)
+    # font_style = ImageFont.truetype("./data/FOT-RodinNTLGPro-DB.ttf", 22)
+    # draw.text((182, 318), str(profile.twitterId), fill=(0, 0, 0), font=font_style)
 
     font_style = ImageFont.truetype("./data/HarmonyOS_Sans_SC_Medium.ttf", 24)
     bbox = font_style.getbbox(profile.word)
     size = (bbox[2] - bbox[0], bbox[3] - bbox[1])
     if size[0] > 480:
-        draw.text((132, 312), profile.word[:int(len(profile.word) * (460 / size[0]))], fill=(0, 0, 0), font=font_style)
-        draw.text((132, 348), profile.word[int(len(profile.word) * (460 / size[0])):], fill=(0, 0, 0), font=font_style)
+        draw.text((116, 312), profile.word[:int(len(profile.word) * (460 / size[0]))], fill=(0, 0, 0), font=font_style)
+        draw.text((116, 348), profile.word[int(len(profile.word) * (460 / size[0])):], fill=(0, 0, 0), font=font_style)
     else:
-        draw.text((132, 312), profile.word, fill=(0, 0, 0), font=font_style)
+        draw.text((116, 312), profile.word, fill=(0, 0, 0), font=font_style)
         
-    font_style = ImageFont.truetype("./data/HarmonyOS_Sans_SC_Medium.ttf", 31)
+    font_style = ImageFont.truetype("./data/HarmonyOS_Sans_SC_Medium.ttf", 33)
     draw.text((298, 440), str(profile.power), fill=(0, 0, 0), font=font_style)
 
     for i in range(0, 5):
@@ -241,7 +241,7 @@ def pjskprofile(userid, private=0, qqnum=0):
             bbox = font_style.getbbox(str(characterRank))
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
-            text_coordinate = (int(916 + 184 * j - text_width / 2), int(688 + 87.5 * i - text_height / 2))
+            text_coordinate = (int(926 + 184 * j - text_width / 2), int(684 + 87 * i - text_height / 2))
             draw.text(text_coordinate, str(characterRank), fill=(0, 0, 0), font=font_style)
     for i in range(0, 2):
         for j in range(0, 4):
@@ -254,7 +254,7 @@ def pjskprofile(userid, private=0, qqnum=0):
             bbox = font_style.getbbox(str(characterRank))
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
-            text_coordinate = (int(916 + 184 * j - text_width / 2), int(512 + 88 * i - text_height / 2))
+            text_coordinate = (int(926 + 184 * j - text_width / 2), int(512 + 88 * i - text_height / 2))
             draw.text(text_coordinate, str(characterRank), fill=(0, 0, 0), font=font_style)
             if character == 26:
                 break

@@ -1,4 +1,3 @@
-from math import log
 import ujson as json
 import sqlite3
 import time
@@ -115,16 +114,13 @@ def get_dangours_speed(userId=None, character_id=None):
             else:
                 return "无法计算速度"
     else:
-        return "目前仅支持wl单榜"
-
+        return "仅worldlink单榜进行中可使用"
 
 def calculate_score_info(score_changes, current_score, now):
     result = ""
-    HOUR_SECONDS = 3600
-    TWENTY_MINUTES = 1200
-
     last_hour_scores = []
     seen_scores = set()
+
     for sc in reversed(score_changes):
         if sc[3] >= now - HOUR_SECONDS and sc[2] not in seen_scores:
             last_hour_scores.append(sc)
@@ -135,11 +131,9 @@ def calculate_score_info(score_changes, current_score, now):
 
     if last_hour_scores:
         first_last_hour_score = last_hour_scores[0]
-        hourly_score = current_score - first_last_hour_score[2]
-        time_diff = now - first_last_hour_score[3]
-        if time_diff > 0:
-            hourly_speed = hourly_score / time_diff * HOUR_SECONDS / 10000
-            result += f"\n时速: {hourly_speed:.2f}W"
+        hourly_score = current_score - first_last_hour_score[2]       
+        hourly_speed = hourly_score / 10000
+        result += f"\n时速: {hourly_speed:.2f}W"
 
         hour_count = sum(1 for i in range(1, len(last_hour_scores)) if last_hour_scores[i][2] > last_hour_scores[i-1][2])
         result += f"\n一小时周回: {hour_count}"
@@ -165,7 +159,7 @@ def calculate_score_info(score_changes, current_score, now):
 
     return result
 
-def fetch_user_info(cur, rank, now, by_rank=False):
+def fetch_user_info(cur, rank, now, by_rank=False, mode= "normal"):
     #logger.info(f"by_rank={by_rank}")
     if by_rank:
         cur.execute("""
@@ -194,12 +188,17 @@ def fetch_user_info(cur, rank, now, by_rank=False):
             return None
         userId, name, rank, last_score, last_time = user_data
 
-    score_changes = get_score_changes(cur, userId, now)
+    score_changes = get_score_changes(cur, userId, now ,mode)
+    # logger.debug(f"score_changes={score_changes}")
     return userId, name, rank, last_score, last_time, score_changes
 
+def get_score_changes(cur, userId, now ,mode):
 
-def get_score_changes(cur, userId, now=None):
-    time_threshold = now - HOUR_SECONDS
+    if mode == "normal":
+       time_threshold = now - HOUR_SECONDS
+    elif mode == "stop":
+       time_threshold = 0
+
     cur.execute(""" 
         SELECT name, rank, score, time 
         FROM skform 
@@ -209,12 +208,13 @@ def get_score_changes(cur, userId, now=None):
     
     changes = cur.fetchall()
     if not changes:
-        logger.debug(f"玩家 {userId} 在最近一小时内没有得分变化。")
+        pass
+        # logger.debug(f"玩家 {userId} 在最近一小时内没有得分变化。")
     return changes
 
 def format_time(timestamp):
     local_time = time.localtime(timestamp)
-    return time.strftime("%Y-%m-%d %H:%M:%S", local_time)
+    return time.strftime("%m-%d %H:%M:%S", local_time)
 
 def format_time_remaining(seconds):
     days, remainder = divmod(seconds, 86400)
@@ -388,18 +388,17 @@ def get_border_scores(character_id=None):
         event_type = event_info['eventType']
 
         if event_id is None:
-            return "目前没有活动进行中。"
-
+            return "没有活动进行中" , None
         if event_type == "world_bloom" and character_id is None:
             _, db_fullborder = get_skdb_connection(event_id, event_type,ignore=True)
             db_path = db_fullborder
-
         elif event_type == "world_bloom" and character_id:
             _, _, _, db_singleborder = get_skdb_connection(event_id, event_type,character=character_id)
             db_path = db_singleborder
         else:
             _, db_borderpath = get_skdb_connection(event_id, event_type)
             db_path = db_borderpath
+        
         # logger.info(f"{db_path}")
         with sqlite3.connect(db_path) as conn:
             cur = conn.cursor()
@@ -424,7 +423,7 @@ def get_border_scores(character_id=None):
                     result += f"{border}: -\n"
             return result,last_time
     else:
-        return "未获取到活动信息。"
+        return "未获取到活动信息。", None 
     
 def get_border_speed(character_id=None):
     event_info = current_event()
@@ -433,7 +432,7 @@ def get_border_speed(character_id=None):
         event_type = event_info['eventType']
 
         if event_id is None:
-            return "目前没有活动进行中。"
+            return "目前没有活动进行中。", None
 
         if event_type == "world_bloom" and character_id is None:
             _, db_fullborder = get_skdb_connection(event_id, event_type, ignore=True)
@@ -444,12 +443,12 @@ def get_border_speed(character_id=None):
         else:
             _, db_borderpath = get_skdb_connection(event_id, event_type)
             db_path = db_borderpath
-        logger.info(f"{db_path}")
+        # logger.info(f"{db_path}")
         with sqlite3.connect(db_path) as conn:
             cur = conn.cursor()
             now = int(time.time())
-            one_hour_ago = now - TWENTY_MINUTES
-            result = "各档线20min*3时速如下:\n"
+            one_hour_ago = now - HOUR_SECONDS
+            result = "各档线时速如下:\n"
             for border in borders:
                 cur.execute('''
                     SELECT score, time
@@ -458,14 +457,12 @@ def get_border_speed(character_id=None):
                     ORDER BY time ASC
                 ''', (border, one_hour_ago, now))
                 score_data = cur.fetchall()
-                # logger.info(f"score_data:{score_data}")
 
                 if len(score_data) >= 2:
-                    first_score, first_timestamp = score_data[0]
-                    last_score, last_timestamp = score_data[-1]
-                    time_diff = last_timestamp - first_timestamp
+                    first_score, _ = score_data[0]
+                    last_score, _ = score_data[-1]
                     score_diff = last_score - first_score
-                    speed = score_diff / (time_diff / TWENTY_MINUTES) * 3
+                    speed = score_diff
                     speed_str = f"{speed / 10000:.3f}w"
                     result += f"{border}: {speed_str} \n"
                 else:
@@ -474,3 +471,86 @@ def get_border_speed(character_id=None):
             return result, last_time
     else:
         return "未获取到活动信息。", None
+
+def timeremain(seconds, detailed=True):
+
+    if seconds < 0:
+        return "已结束"
+    
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    seconds = seconds % 60
+
+    if detailed:
+        return f"{hours}小时{minutes}分钟{seconds}秒" if hours > 0 else f"{minutes}分钟{seconds}秒"
+    else:
+        return f"{hours:02}:{minutes:02}:{seconds:02}"
+    
+def get_stop_time(rank=None, userId=None, character=None):
+    event_info = current_event()
+    now = int(time.time())
+    is_draw = False
+    if event_info:
+        event_id = event_info['id']
+        event_type = event_info['eventType']
+
+        if event_id is None:
+            return "目前没有活动进行中", is_draw
+
+        if event_type == "marathon" or event_type == "cheerful_carnival":
+            db_path, _ = get_skdb_connection(event_id, event_type)
+        elif event_type == "world_bloom" and character:
+            _, db_singlepath, _, _ = get_skdb_connection(event_id, event_type, character)
+            db_path = db_singlepath
+        elif event_type == "world_bloom" and character is None:
+            db_path, _ = get_skdb_connection(event_id, event_type, ignore=True)
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.cursor()
+
+            user_data = fetch_user_info(cur, rank or userId, now, mode="stop", by_rank=bool(rank))
+
+            if not user_data:
+                return "未找到对应玩家的信息",is_draw
+
+            userId, name, user_rank, last_score, last_time, score_records = user_data
+            # 计算停车时间段
+            stop_segments = []
+
+            if score_records:
+                prev_score = score_records[0][2]  # 初始分数
+                prev_time = score_records[0][3]   # 初始时间戳
+
+                for record in score_records[1:]:
+                    score = record[2]       # 当前分数
+                    timestamp = record[3]  # 当前时间戳
+
+                    time_gap = timestamp - prev_time
+
+                    if score == prev_score:
+                        if time_gap > 300:  # 分数未变间隔超过5分钟
+                            if stop_segments and stop_segments[-1]["start"] == prev_time:
+                                stop_segments[-1]["end"] = timestamp  # 合并连续停车段
+                            else:
+                                stop_segments.append({"start": prev_time, "end": timestamp})
+                    else:
+                        prev_time = timestamp
+                    # 更新score
+                    prev_score = score
+
+            if stop_segments:
+                result = f"第{user_rank}名 {name}的分数为{last_score} 停车时间段:\n"
+                total_stop_time = 0
+                for i, segment in enumerate(stop_segments, 1):
+                    start_time = format_time(segment["start"])
+                    end_time = format_time(segment["end"])
+                    duration = segment["end"] - segment["start"]
+                    total_stop_time += duration
+                    result += f"{i}. {start_time} ~ {end_time} ({timeremain(duration, False)})\n"
+                is_draw=True
+                result += f"总停车时间：{timeremain(total_stop_time, True)}\n仅记录在前100名内的数据。"
+            else:
+                result = f"{name}\n未停车，仅记录在前100名内的数据。"
+
+            return result , is_draw
+    else:
+        return "未获取到活动信息" , is_draw
